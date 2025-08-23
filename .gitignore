@@ -45,3 +45,8 @@ app.*.map.json
 # Environment variables
 .env
 
+# Backend
+backend/.env
+backend/__pycache__/
+backend/*.pyc
+
