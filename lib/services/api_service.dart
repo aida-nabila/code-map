@@ -6,6 +6,28 @@ import '../models/user_profile_match.dart';
 import '../models/user_responses.dart';
 
 class ApiService {
+  static Future<http.Response> _requestWithRetry(
+    Future<http.Response> Function() request, {
+    int maxRetries = 3,
+  }) async {
+    int attempt = 0;
+
+    while (attempt < maxRetries) {
+      try {
+        print('API Attempt ${attempt + 1}');
+        final response = await request().timeout(Duration(seconds: 30));
+        return response;
+      } catch (e) {
+        attempt++;
+        print('API Attempt $attempt failed: $e');
+
+        if (attempt >= maxRetries) rethrow;
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+    throw Exception('Max retries exceeded');
+  }
+
   static final String baseUrl =
       dotenv.env['BASE_URL'] ?? "http://localhost:8000";
 
@@ -13,11 +35,11 @@ class ApiService {
   static Future<int> submitTest(UserResponses responses) async {
     final url = Uri.parse("$baseUrl/submit-test");
 
-    final response = await http.post(
-      url,
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode(responses.toJson()),
-    );
+    final response = await _requestWithRetry(() => http.post(
+          url,
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode(responses.toJson()),
+        ));
 
     if (response.statusCode == 200) {
       final decoded = jsonDecode(response.body);
