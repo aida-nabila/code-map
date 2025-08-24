@@ -1,4 +1,4 @@
-import 'package:code_map/screens/results/job_recommendations.dart';
+import 'package:code_map/screens/results/career_recommendations.dart';
 import 'package:flutter/material.dart';
 import 'package:code_map/models/follow_up_responses.dart';
 import '../../models/user_responses.dart';
