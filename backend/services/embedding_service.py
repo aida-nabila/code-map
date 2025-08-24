@@ -1,5 +1,6 @@
 import glob
 import os
+import pickle
 from typing import Any, Dict, List
 from dotenv import load_dotenv
 import openai
@@ -28,7 +29,118 @@ if not OPENAI_API_KEY:
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
+# -----------------------------
+# Global variables - Now initialized as None
+# -----------------------------
+_tokenizer = None
+_model = None
+df = pd.DataFrame()
+job_embeddings = []
 
+def initialize_ai_models():
+    """Initialize AI models and load job data - call this on server startup"""
+    global _tokenizer, _model, df, job_embeddings
+    
+    print("Initializing AI models...")
+    
+    # Load HF model
+    hf_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+    _tokenizer = AutoTokenizer.from_pretrained(hf_model_name)
+    _model = AutoModel.from_pretrained(hf_model_name)
+    print("✓ HuggingFace model loaded")
+    
+    # Load job data
+    folder_path = "data"
+    csv_files = glob.glob(f"{folder_path}/*.csv")
+    dfs: List[pd.DataFrame] = []
+
+    for file in csv_files:
+        try:
+            df_temp = pd.read_csv(file)
+            if not df_temp.empty:
+                dfs.append(df_temp)
+        except pd.errors.EmptyDataError:
+            print(f"Skipping empty file: {file}")
+            continue
+
+    if dfs:
+        df = pd.concat(dfs, ignore_index=True)
+        print(f"✓ Loaded {len(df)} job records")
+        
+        # Try to load pre-generated embeddings
+        embeddings_file = os.path.join(folder_path, "job_embeddings.pkl")
+        if os.path.exists(embeddings_file):
+            print("Loading pre-generated embeddings...")
+            try:
+                with open(embeddings_file, 'rb') as f:
+                    job_embeddings = pickle.load(f)
+                print(f"✓ Loaded {len(job_embeddings)} pre-generated embeddings")
+            except Exception as e:
+                print(f"Error loading embeddings: {e}. Regenerating...")
+                job_embeddings = _generate_and_save_embeddings(df, embeddings_file)
+        else:
+            # Generate and save embeddings for first time
+            job_embeddings = _generate_and_save_embeddings(df, embeddings_file)
+    else:
+        print("No valid data found in CSV files.")
+        df = pd.DataFrame()
+    
+    print("✓ Server startup complete - Ready for requests!")
+
+def _generate_and_save_embeddings(df, embeddings_file):
+    """Generate embeddings and save to file"""
+    print("Generating embeddings for all job descriptions...")
+    print("This will take a while (5-15 minutes)...")
+    
+    job_descriptions = df["Full Job Description"].astype(str)
+    
+    # Show progress
+    total = len(job_descriptions)
+    embeddings = []
+    
+    for i, job_desc in enumerate(job_descriptions):
+        if i % 100 == 0:  # Print progress every 100 jobs
+            print(f"Processing {i}/{total} jobs...")
+        embeddings.append(get_embeddings(job_desc))
+    
+    # Save to file
+    try:
+        with open(embeddings_file, 'wb') as f:
+            pickle.dump(embeddings, f)
+        print(f"✓ Saved {len(embeddings)} embeddings to {embeddings_file}")
+    except Exception as e:
+        print(f"Error saving embeddings: {e}")
+    
+    return embeddings
+
+# -----------------------------
+# Helper function to check if models are loaded
+# -----------------------------
+def _ensure_models_loaded():
+    """Ensure models are loaded before using them"""
+    if _tokenizer is None or _model is None:
+        raise Exception("AI models not initialized. Call initialize_ai_models() first.")
+
+# -----------------------------
+# HF encoder for embeddings
+# -----------------------------
+def get_embeddings(text: str):
+    """
+    Turn text into an embedding using the HF model.
+    Returns a Python list (JSON-serializable).
+    """
+    _ensure_models_loaded()
+    
+    inputs = _tokenizer(text, return_tensors="pt", truncation=True, padding=True)
+    with torch.no_grad():
+        outputs = _model(**inputs)
+    # Simple mean pooling
+    emb = outputs.last_hidden_state.mean(dim=1)  # [1, hidden]
+    return emb.squeeze(0).cpu().numpy().tolist()
+
+# -----------------------------
+# OpenAI call function
+# -----------------------------
 def call_openai(prompt: str, max_tokens=2000, temperature=0.2) -> str:
     """
     Generate a descriptive profile text from OpenAI based on a prompt.
@@ -49,62 +161,6 @@ def call_openai(prompt: str, max_tokens=2000, temperature=0.2) -> str:
         temperature=temperature,
     )
     return resp.choices[0].message.content.strip()
-
-
-# -----------------------------
-# Job CSV embeddings
-# -----------------------------
-folder_path = "data"  # CSV folder
-hf_model_name = "sentence-transformers/all-MiniLM-L6-v2"
-
-csv_files = glob.glob(f"{folder_path}/*.csv")
-dfs: List[pd.DataFrame] = []
-
-for file in csv_files:
-    try:
-        df_temp = pd.read_csv(file)
-        if not df_temp.empty:
-            dfs.append(df_temp)
-    except pd.errors.EmptyDataError:
-        print(f"Skipping empty file: {file}")
-        continue
-
-if dfs:
-    df = pd.concat(dfs, ignore_index=True)
-else:
-    print("No valid data found in CSV files.")
-    df = pd.DataFrame()
-
-# -----------------------------
-# HF encoder for embeddings
-# -----------------------------
-_tokenizer = AutoTokenizer.from_pretrained(hf_model_name)
-_model = AutoModel.from_pretrained(hf_model_name)
-
-
-def get_embeddings(text: str):
-    """
-    Turn text into an embedding using the HF model.
-    Returns a Python list (JSON-serializable).
-    """
-    inputs = _tokenizer(text, return_tensors="pt", truncation=True, padding=True)
-    with torch.no_grad():
-        outputs = _model(**inputs)
-    # Simple mean pooling
-    emb = outputs.last_hidden_state.mean(dim=1)  # [1, hidden]
-    return emb.squeeze(0).cpu().numpy().tolist()
-
-
-# -----------------------------
-# Generate Job embeddings
-# -----------------------------
-if not df.empty and "Full Job Description" in df.columns:
-    job_descriptions = df["Full Job Description"].astype(str)
-    job_embeddings = [get_embeddings(job) for job in job_descriptions]
-    print("Embeddings generated for all job descriptions.")
-else:
-    print("No job descriptions found.")
-
 
 # -----------------------------
 # Data aggregation for a user
@@ -224,10 +280,12 @@ def create_user_embedding(user_test_id: int) -> Dict[str, Any]:
         "combined_data": combined_data,  # included for debugging/inspection
     }
 
-
+# -----------------------------
+# Match user to job 
+# -----------------------------
 def match_user_to_job(
     user_test_id: int,
-    user_embedding: List[float],
+    user_embedding: List[float], use_openai_summary: bool = True, # new flag to control summary generation
 ) -> Dict[str, Any]:
     """
     Compare user embedding to all job embeddings using cosine similarity.
@@ -256,6 +314,21 @@ def match_user_to_job(
         job = df.iloc[idx]
         similarity_score = float(similarities[idx])
         similarity_percentage = round(similarity_score * 100, 2)
+        job_desc = job.get("Full Job Description", "N/A")
+        
+        # Generate cleaned/comprehensive description using OpenAI
+        if use_openai_summary and job_desc != "N/A":
+            prompt = ("Extract a clear, comprehensive job description from the text below. "
+                        "Focus on responsibilities, required skills, qualifications, and career opportunities. "
+                        "Write it concisely in a professional tone.\n\n"
+                        f"{job_desc}"
+            )
+            try:
+                job_desc = call_openai(prompt, max_tokens=800)
+            except Exception as e:
+                print(f"OpenAI error for job index {idx}: {e}")
+                # fallback to original
+                job_desc = job.get("Full Job Description", "N/A")
 
         top_matches.append(
             {
@@ -264,9 +337,16 @@ def match_user_to_job(
                 "similarity_score": similarity_score,
                 "similarity_percentage": similarity_percentage,
                 "job_title": job.get("Title", "N/A"),
-                "job_description": job.get("Full Job Description", "N/A"),
+                "job_description": job_desc,
             }
         )
 
     return {"top_matches": top_matches}
+
+# -----------------------------
+# Check if everything is loaded
+# -----------------------------
+def is_initialized() -> bool:
+    """Check if AI models and data are loaded"""
+    return _tokenizer is not None and _model is not None and not df.empty
 
