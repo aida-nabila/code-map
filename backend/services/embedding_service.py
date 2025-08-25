@@ -316,19 +316,85 @@ def match_user_to_job(
         similarity_percentage = round(similarity_score * 100, 2)
         job_desc = job.get("Full Job Description", "N/A")
         
+        # Initialize variables for skills and knowledge
+        required_skills = []
+        required_knowledge = []
+        
         # Generate cleaned/comprehensive description using OpenAI
         if use_openai_summary and job_desc != "N/A":
-            prompt = ("Extract a clear, comprehensive job description from the text below. "
-                        "Focus on responsibilities, required skills, qualifications, and career opportunities. "
-                        "Write it concisely in a professional tone.\n\n"
-                        f"{job_desc}"
-            )
             try:
-                job_desc = call_openai(prompt, max_tokens=800)
+                summary_prompt = (
+                    "Extract a clear, comprehensive job description from the text below. "
+                    "Focus on responsibilities. "
+                    "Write it concisely in a professional tone (1 paragraph).\n\n"
+                    f"JOB DESCRIPTION TEXT:\n{job_desc}\n\n"
+                    "Return only the cleaned-up job description without any additional text."
+                )
+                
+                skills_prompt = (
+                    "ANALYZE THIS JOB DESCRIPTION AND EXTRACT ALL REQUIRED SKILLS:\n\n"
+                    f"{job_desc}\n\n"
+                    "EXTRACTION RULES:\n"
+                    "1. Extract BOTH technical skills (programming languages, tools, software) AND soft skills (communication, leadership, teamwork)\n"
+                    "2. Return ONLY a comma-separated list without any additional text\n"
+                    "3. Be specific - if it mentions 'Python', include 'Python', not just 'programming'\n"
+                    "4. Include skills mentioned in requirements, qualifications, or responsibilities sections\n"
+                    "5. Remove duplicates and keep the most specific term\n\n"
+                    "EXAMPLE OUTPUT: Python, Java, SQL, React, AWS, Communication, Teamwork, Problem Solving\n\n"
+                    "EXTRACTED SKILLS:"
+                )
+                
+                knowledge_prompt = (
+                    "ANALYZE THIS JOB DESCRIPTION AND EXTRACT ALL REQUIRED KNOWLEDGE AREAS:\n\n"
+                    f"{job_desc}\n\n"
+                    "EXTRACTION RULES:\n"
+                    "1. Extract knowledge domains, subject matter expertise, and specialized areas\n"
+                    "2. Include things like: algorithms, data structures, machine learning, web development, cybersecurity, etc.\n"
+                    "3. Return ONLY a comma-separated list without any additional text\n"
+                    "4. Focus on knowledge requirements, not just skills\n"
+                    "5. Remove duplicates\n\n"
+                    "EXAMPLE OUTPUT: Algorithms, Data Structures, Machine Learning, Web Development, Database Systems, Cloud Computing\n\n"
+                    "EXTRACTED KNOWLEDGE:"
+                )
+                
+                print(f"Processing job {idx} with OpenAI...")
+                
+                # Get job description summary
+                job_desc = call_openai(summary_prompt, max_tokens=800)
+                
+                # Extract skills with retry logic
+                try:
+                    skills_response = call_openai(skills_prompt, max_tokens=300)
+                    print(f"Raw skills response: {skills_response}")
+                    required_skills = [skill.strip() for skill in skills_response.split(',') if skill.strip()]
+                except Exception as skills_error:
+                    print(f"Skills extraction failed for job {idx}: {skills_error}")
+                    required_skills = ["Error extracting skills"]
+                
+                # Extract knowledge with retry logic
+                try:
+                    knowledge_response = call_openai(knowledge_prompt, max_tokens=300)
+                    print(f"Raw knowledge response: {knowledge_response}")
+                    required_knowledge = [knowledge.strip() for knowledge in knowledge_response.split(',') if knowledge.strip()]
+                except Exception as knowledge_error:
+                    print(f"Knowledge extraction failed for job {idx}: {knowledge_error}")
+                    required_knowledge = ["Error extracting knowledge"]
+                
+                # Debug prints after extraction
+                print(f"Extracted skills for job {idx}: {required_skills}")
+                print(f"Extracted knowledge for job {idx}: {required_knowledge}")
+                
             except Exception as e:
                 print(f"OpenAI error for job index {idx}: {e}")
                 # fallback to original
                 job_desc = job.get("Full Job Description", "N/A")
+                required_skills = ["Failed to extract skills"]
+                required_knowledge = ["Failed to extract knowledge"]
+        else:
+            # If not using OpenAI summary, still try to extract basic info
+            job_desc = job.get("Full Job Description", "N/A")
+            required_skills = ["Enable OpenAI extraction for detailed skills"]
+            required_knowledge = ["Enable OpenAI extraction for detailed knowledge"]
 
         top_matches.append(
             {
@@ -338,9 +404,11 @@ def match_user_to_job(
                 "similarity_percentage": similarity_percentage,
                 "job_title": job.get("Title", "N/A"),
                 "job_description": job_desc,
+                "required_skills": required_skills,
+                "required_knowledge": required_knowledge
             }
         )
-
+    
     return {"top_matches": top_matches}
 
 # -----------------------------

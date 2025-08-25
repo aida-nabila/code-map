@@ -17,6 +17,8 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   final Map<int, bool> _expandedCards = {}; // Track which cards are expanded
+  int?
+      _selectedJobIndex; // Track which job is selected for skills/knowledge display
 
   @override
   void initState() {
@@ -26,19 +28,43 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
 
   Future<void> _fetchProfileMatch() async {
     try {
+      print('STARTED: Fetching profile match...');
       final result = await ApiService.getUserProfileMatch(
         userTestId: widget.userTestId,
       );
 
       if (result == null) {
+        print('FAILED: API returned NULL result');
         setState(() {
           _errorMessage = "Failed to fetch profile match.";
           _isLoading = false;
         });
       } else {
+        print('SUCCESS: API call completed!');
+        print('Total jobs received: ${result.topMatches.length}');
+
+        // Check each job for skills and knowledge
+        for (var i = 0; i < result.topMatches.length; i++) {
+          final job = result.topMatches[i];
+          print('--- Job ${i + 1} ---');
+          print('Title: ${job.jobTitle}');
+          print('Index: ${job.jobIndex}');
+          print('Skills count: ${job.requiredSkills.length}');
+          print('Skills: ${job.requiredSkills}');
+          print('Knowledge count: ${job.requiredKnowledge.length}');
+          print('Knowledge: ${job.requiredKnowledge}');
+          print('');
+        }
+
         setState(() {
           _profileMatch = result;
           _isLoading = false;
+          // Set first job as selected by default
+          if (_profileMatch!.topMatches.isNotEmpty) {
+            _selectedJobIndex = _profileMatch!.topMatches[0].jobIndex;
+            _expandedCards[_selectedJobIndex!] = true;
+            print('Selected first job by default: Index $_selectedJobIndex');
+          }
         });
       }
     } catch (e) {
@@ -49,10 +75,17 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
     }
   }
 
-  // Toggle card expansion state
-  void _toggleCardExpansion(int jobIndex) {
+  // Toggle card expansion and selection state
+  void _selectCareer(int jobIndex) {
     setState(() {
-      _expandedCards[jobIndex] = !(_expandedCards[jobIndex] ?? false);
+      // If clicking the already selected career, just toggle expansion
+      if (_selectedJobIndex == jobIndex) {
+        _expandedCards[jobIndex] = !(_expandedCards[jobIndex] ?? false);
+      } else {
+        // Select new career and expand it
+        _selectedJobIndex = jobIndex;
+        _expandedCards[jobIndex] = true;
+      }
     });
   }
 
@@ -120,13 +153,20 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
 
   Widget _buildJobCard(JobMatch job) {
     final bool isExpanded = _expandedCards[job.jobIndex] ?? false;
+    final bool isSelected = _selectedJobIndex == job.jobIndex;
 
     return Card(
-      elevation: 3,
+      elevation: isSelected ? 4 : 3,
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isSelected
+            ? BorderSide(color: Theme.of(context).primaryColor, width: 2)
+            : BorderSide.none,
+      ),
+      color: isSelected ? Colors.blue[50] : null,
       child: InkWell(
-        onTap: () => _toggleCardExpansion(job.jobIndex),
+        onTap: () => _selectCareer(job.jobIndex),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -138,8 +178,12 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
                   Expanded(
                     child: Text(
                       job.jobTitle,
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color:
+                            isSelected ? Theme.of(context).primaryColor : null,
+                      ),
                     ),
                   ),
                   Chip(
@@ -173,21 +217,131 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Text(
-                      "Job Index: ${job.jobIndex}",
-                      style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      isSelected ? "Selected" : "Tap to select",
+                      style: TextStyle(
+                        color: isSelected
+                            ? Theme.of(context).primaryColor
+                            : Colors.grey,
+                        fontSize: 12,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Icon(
                       isExpanded
                           ? Icons.keyboard_arrow_up
                           : Icons.keyboard_arrow_down,
-                      color: Colors.grey,
+                      color: isSelected
+                          ? Theme.of(context).primaryColor
+                          : Colors.grey,
                     ),
                   ],
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  // Build skills card for the SELECTED career
+  Widget _buildSkillsCard(JobMatch job) {
+    print('TRYING to build skills card for: ${job.jobTitle}');
+    print('Skills available: ${job.requiredSkills}');
+    if (job.requiredSkills.isEmpty) {
+      print('SKILLS CARD: No skills to display');
+      return const SizedBox.shrink();
+    }
+    print('SKILLS CARD: Building with ${job.requiredSkills.length} skills');
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.build, size: 20, color: Colors.blue),
+                SizedBox(width: 8),
+                Text(
+                  "Key Skills Required",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: job.requiredSkills.map((skill) {
+                return Chip(
+                  label: Text(
+                    skill,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  backgroundColor: Colors.blue[50],
+                  visualDensity: VisualDensity.compact,
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Build knowledge card for the SELECTED career
+  Widget _buildKnowledgeCard(JobMatch job) {
+    print('TRYING to build knowledge card for: ${job.jobTitle}');
+    print('Knowledge available: ${job.requiredKnowledge}');
+    if (job.requiredKnowledge.isEmpty) {
+      print('KNOWLEDGE CARD: No knowledge to display');
+      return const SizedBox.shrink();
+    }
+    print(
+        'KNOWLEDGE CARD: Building with ${job.requiredKnowledge.length} items');
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.school, size: 20, color: Colors.green),
+                SizedBox(width: 8),
+                Text(
+                  "Key Knowledge Required",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: job.requiredKnowledge.map((knowledge) {
+                return Chip(
+                  label: Text(
+                    knowledge,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  backgroundColor: Colors.green[50],
+                  visualDensity: VisualDensity.compact,
+                );
+              }).toList(),
+            ),
+          ],
         ),
       ),
     );
@@ -313,7 +467,7 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
-                          "Your Profile Summary",
+                          "Profile Summary",
                           style: TextStyle(
                               fontSize: 20, fontWeight: FontWeight.bold),
                         ),
@@ -336,11 +490,11 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
                       ),
                       const SizedBox(height: 24),
 
-                      // Job Recommendations Section
+                      // Career Paths Recommendations Section
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 16),
                         child: Text(
-                          "Recommended Career",
+                          "Recommended Career Paths",
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -351,6 +505,45 @@ class _JobRecommendationsScreenState extends State<JobRecommendationsScreen> {
                       ..._profileMatch!.topMatches
                           .map((job) => _buildJobCard(job))
                           .toList(),
+
+                      // Show skills and knowledge ONLY for the selected career
+                      if (_selectedJobIndex != null) ...[
+                        // Find the selected job
+                        for (final job in _profileMatch!.topMatches)
+                          if (job.jobIndex == _selectedJobIndex) ...[
+                            _buildSkillsCard(job),
+                            _buildKnowledgeCard(job),
+                          ],
+                      ],
+
+                      // Proceed Button
+                      const SizedBox(height: 32),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              // Navigate to Skill Gap Analysis
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              "Proceed to Skill Gap Analysis",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 24),
                     ],
                   ),

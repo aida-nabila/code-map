@@ -35,15 +35,15 @@ class FollowUpResponses(BaseModel):
 # Job matching / profile schemas
 # -----------------------------
 class JobMatch(BaseModel):
-    user_test_id: int
     job_index: int
     similarity_score: float
     similarity_percentage: float
     job_title: str
     job_description: str
+    required_skills: Optional[List[str]] = None
+    required_knowledge: Optional[List[str]] = None
 
 
 class UserProfileMatchResponse(BaseModel):
     profile_text: str
     top_matches: List[JobMatch]
-    combined_data: Optional[dict] = None

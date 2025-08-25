@@ -138,29 +138,34 @@ def submit_follow_up(data: FollowUpResponses):
 
 
 # -----------------------------
-# Generate user profile + job matches
+# Generate user profile and job matches
 # -----------------------------
 @router.post("/user-profile-match", response_model=UserProfileMatchResponse)
 def user_profile_match(request: SkillReflectionRequest):
     user_test_id = request.user_test_id
 
+    # Create user embedding + profile text
     user_data = create_user_embedding(user_test_id)
     if "error" in user_data:
         return UserProfileMatchResponse(
-            profile_text="", top_matches=[], combined_data={"error": user_data["error"]}
+            profile_text="",
+            top_matches=[]
         )
 
+    # Match jobs
     matches = match_user_to_job(user_test_id, user_data["user_embedding"])
     if "error" in matches:
         return UserProfileMatchResponse(
             profile_text=user_data["profile_text"],
-            top_matches=[],
-            combined_data={"error": matches["error"]},
+            top_matches=[]
         )
 
+    # Convert job dicts to JobMatch models
     top_matches_list = [JobMatch(**job) for job in matches["top_matches"]]
+
+    # Return clean payload
     return UserProfileMatchResponse(
         profile_text=user_data["profile_text"],
-        top_matches=top_matches_list,
-        combined_data=user_data["combined_data"],
+        top_matches=top_matches_list
     )
+
